@@ -1,10 +1,11 @@
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 module Type (
   Kind(..), HasKind(..),
 
   Type(..),
   TyVar(..), HasTyVar(..),
   TyCon(..), TyId(..),
-  mkTyVar, mkTyCon,
+  mkTyVar, mkTyCon, mkTyGen,
 
   unitType, charType, intType, floatType, listType, arrowType,
   stringType, tuple2Type,
@@ -12,15 +13,16 @@ module Type (
   tyArr, apTyCon, pairTypeWith, mkListType,
 
   Subst, nullSubst, (+->), (@@), merge,
-  Qual(..), Pred(..), Scheme(..), Assump(..),
+  Qual(..), Pred(..), Scheme(..), quantify, toScheme, Assump(..),
 
-  pprKind, pprType,
+  pprKind, pprType, pprSubst, pprAssump, pprScheme,
 ) where
+
+import Util
 
 import qualified Data.List as List
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Text.PrettyPrint
 
 data Kind
   = KStar
@@ -51,6 +53,9 @@ newtype TyCon = MkTyCon { unTyCon :: (String, Kind) }
   deriving (Show, Eq, Ord)
 
 mkTyCon name k = TyCon (MkTyCon (name, k))
+
+mkTyGen :: Int -> Type
+mkTyGen = TyGen . TyId
 
 unitType = mkTyCon "()" KStar
 charType = mkTyCon "Char" KStar
@@ -157,12 +162,14 @@ instance HasTyVar Scheme where
   applySubst s (Forall ks qt) = Forall ks (applySubst s qt)
   tyVars (Forall ks qt)       = tyVars qt
 
+-- Make a generic type scheme
 quantify :: [TyVar] -> Qual Type -> Scheme
-quantify vs qt = Forall ks (applySubst s qt)
+quantify genTyVars concreteType
+  = Forall usedKinds (applySubst tv2gen concreteType)
   where
-    s = Map.fromList (zip vs' (map (TyGen . TyId) [0..]))
-    ks = map kind vs'
-    vs' = [v | v <- tyVars qt, v `elem` vs]
+    tv2gen = Map.fromList (zip usedGenTyVars (map mkTyGen [0..]))
+    usedKinds = map kind usedGenTyVars
+    usedGenTyVars = [tv | tv <- tyVars concreteType, tv `elem` genTyVars]
 
 -- Simple scheme
 toScheme :: Type -> Scheme
@@ -176,6 +183,9 @@ instance HasTyVar Assump where
   tyVars = List.nub . concatMap tyVars . Map.elems . unAssump
 
 -- ppr
+instance Ppr Kind where
+  ppr = pprKind
+
 pprKind :: Kind -> Doc
 pprKind k = case k of
   KStar -> text "*"
@@ -188,13 +198,20 @@ pprKind k = case k of
       where
         mbAddParen = if needParen then parens else id
 
+instance Ppr Type where
+  ppr = pprType
+
 pprType :: Type -> Doc
 pprType ty = case ty of
-  TyVar (MkTyVar (TyId i, _)) -> text "t" <> int i
+  TyVar tv -> ppr tv
   TyCon (MkTyCon (name, k)) -> case k of
     KStar -> text name
     _ -> parens (text name)
   TyApp t1 t2 -> pprTyApp False ty
+  TyGen (TyId i) -> char (['a'..'z'] !! i)
+
+instance Ppr TyVar where
+  ppr (MkTyVar (TyId i, _)) = text "t" <> int i
 
 pprTyApp :: Bool -> Type -> Doc
 pprTyApp needParen ty = case toList ty of
@@ -216,4 +233,27 @@ pprTyApp needParen ty = case toList ty of
       _ -> [t]
 
     mbAddParen = if needParen then parens else id
+
+instance Ppr Subst where
+  ppr = pprSubst
+
+pprSubst :: Subst -> Doc
+pprSubst s = braces (vcat (map pprEntry (Map.toList s)))
+  where
+    pprEntry (tv, t) = pprType (TyVar tv) <+> equals <+> pprType t
+
+instance Ppr Assump where
+  ppr = pprAssump
+
+pprAssump :: Assump -> Doc
+pprAssump (Assump dct) = braces (vcat (map pprEntry (Map.toList dct)))
+  where
+    pprEntry (name, scheme)
+      = text name <+> text "::" <+> pprScheme scheme
+
+instance Ppr Scheme where
+  ppr = pprScheme
+
+pprScheme :: Scheme -> Doc
+pprScheme (Forall ks (ps :=> t)) = pprType t
 

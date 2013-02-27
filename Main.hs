@@ -1,23 +1,21 @@
-import Text.PrettyPrint
 import qualified Data.Map as Map
 
+import Util
 import Parser
 import Core
-import ToCore
 import Type
-import TyCheck
+import TyInterf
 
-env = Map.fromList [("+", TyLam [] (intType `tyArr` intType `tyArr` intType))]
+bltinAssump = Assump $ Map.fromList
+  [ ("+", toScheme (intType `tyArr` intType `tyArr` intType))
+  , ("chr", toScheme (intType `tyArr` charType))
+  , ("fix", Forall [KStar]
+              ([] :=> ((mkTyGen 0 `tyArr` mkTyGen 0) `tyArr` mkTyGen 0)))
+  ]
 
 main = do
   src <- getContents
   let prog = readProgram src
-      e = toCore prog
-  --print (pprExpr e)
-  case runTypeCheck env e of
-    Left err -> print err
-    Right (env, et) -> do
-      putStr "subst env: "
-      putStrLn (showSubstEnv env)
-      print (pprExpr et)
+      (prog', _) = runTi bltinAssump (tiBindings prog (EVar () "main"))
+  print (vcat (map ppr prog'))
 

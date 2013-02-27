@@ -12,7 +12,7 @@ import qualified Text.Parsec.Token as T
 
 import Core
 
-readProgram :: String -> [ScDefn ()]
+readProgram :: String -> [Binding ()]
 readProgram str = case parse pProgram "<Core program>" str of
   Left e -> error $ show e
   Right r -> r
@@ -57,12 +57,7 @@ semi = T.semi lexer
 comma = T.comma lexer
 ws = T.whiteSpace lexer
 
-pSupercomb = do
-  name : args <- many1 ident
-  reservedOp "="
-  rhs <- pExpr
-  semi
-  return (name, args, rhs)
+pSupercomb = pBinding
 
 pExpr = pIfExpr <|> pLetrecExpr <|> pLetExpr <|> pLamExpr <|> pInfixExpr
 
@@ -90,11 +85,11 @@ pLetrecExpr = do
   return $ ELet () True bindings body
 
 pBinding = do
-  name <- ident
+  name : args <- many1 ident
   reservedOp "="
   rhs <- pExpr
   semi
-  return (name, rhs)
+  return (Binding () name args rhs)
 
 pLamExpr = do
   reservedOp "\\"
@@ -126,6 +121,6 @@ pAtom = parens pExpr
 pNum = do
   num <- numLit
   return $ case num of
-    Left i -> EInt () (fromIntegral i)
-    Right f -> EFloat () f
+    Left i -> ELit () (LInt (fromIntegral i))
+    Right d -> ELit () (LFloat d)
 

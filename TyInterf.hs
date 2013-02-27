@@ -1,11 +1,20 @@
-module TyInterf where
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+module TyInterf (
+  runTi,
+  tiExpr,
+  tiBindings,
+) where
 
-import Control.Monad.RWS
-import Data.Map (Map)
-import qualified Data.Map as Map
-
+import Util
 import Type
 import Core
+
+import Control.Monad.RWS hiding ((<>))
+import Data.Foldable (toList)
+import Data.Map (Map)
+import qualified Data.Map as Map
+import qualified Data.List as List
+import Debug.Trace
 
 -- Type interference state
 data TiState
@@ -30,6 +39,9 @@ unify t1 t2 = do
   s <- gets subst
   u <- mgu (applySubst s t1) (applySubst s t2)
   extendSubst u
+  traceM (show (text "unify" <+> pprType t1 <+> text "with" <+> pprType t2 <+>
+                text "under" <+> pprSubst s $$
+                text "produces" <+> pprSubst u <> semi))
 
 extendSubst :: Subst -> TiM ()
 extendSubst s' = modify $ \st -> st {
@@ -110,43 +122,150 @@ match t1 t2 = fail $ "cannot unify " ++ show (pprType t1) ++
                      " with " ++ show (pprType t2)
 
 -- Finally, the type inferencer!
-type Infer e t = Assump -> e -> TiM ([Pred], t)
-type InferredType = ([Pred], Type)
+type QType = Qual Type
 
-simpleType :: Type -> InferredType
-simpleType t = ([], t)
+simpleQual :: Type -> QType
+simpleQual t = [] :=> t
 
-typeOf :: Expr InferredType -> Type
-typeOf = snd . annotationOf
+typeOf :: HasAnnotation a => a QType -> Type
+typeOf e = case annotationOf e of
+  _ :=> t -> t
 
-predsOf :: Expr InferredType -> [Pred]
-predsOf = fst  .annotationOf
+predsOf :: HasAnnotation a => a QType -> [Pred]
+predsOf e = case annotationOf e of
+  ps :=> _ -> ps
 
-tiExpr :: Expr () -> TiM (Expr InferredType)
-tiExpr e = case e of
-  EInt _ i -> return $ EInt (simpleType intType) i
+tiExpr :: Expr () -> TiM (Expr QType)
+tiExpr e = traceM (show (text "tiExpr" <+> pprExpr e)) >> case e of
+  ELit _ lit -> do
+    qt <- tiLiteral lit
+    return $ ELit qt lit
 
   EVar _ name -> do
-    mbScheme <- asks (Map.lookup name . unAssump)
+    gamma <- ask
+    let mbScheme = Map.lookup name (unAssump gamma)
     case mbScheme of
       Nothing -> fail $ "unbound identifier: " ++ name
       Just scheme -> do
         (ps :=> t) <- freshInst scheme
-        return $ EVar (ps, t) name
+        traceM (show (text "instantiate" <+> text name <+> text "in" <+>
+                      pprAssump gamma <> comma <+> text "got" <+>
+                      pprType t <> semi))
+        return $ EVar (ps :=> t) name
 
   EAp _ e f -> do
     e' <- tiExpr e
     f' <- tiExpr f
     t <- newTyVar KStar
     unify (typeOf f' `tyArr` t) (typeOf e')
-    return (EAp (predsOf f' ++ predsOf e', t) e' f')
+    return $ EAp ((predsOf f' ++ predsOf e') :=> t) e' f'
 
-  ELet _ bs e -> do
-    bs' <- tiBindings bs
-    e' <- local (updateAssump bs') $ tiExpr e
-    return (ELet 
+  ELet _ True bs e -> do
+    (bs', e') <- tiBindings bs e
+    return $ ELet (annotationOf e') True bs' e'
 
-tiBindings :: Binding () -> TiM (Binding InferredType)
-tiBindings (name, args, body) = do
+  ELet _ False bs e -> do
+    inputGamma <- ask
+    tiBinds <- mapM tiLetBinding bs
+    currSubst <- gets subst
+    let fixedTyVars = tyVars (applySubst currSubst inputGamma)
+        letTyVars = tyVars (map typeOf tiBinds)
+        genericTyVars = letTyVars List.\\ fixedTyVars
+        schemes = map (quantify genericTyVars . annotationOf) tiBinds
+        names = map bind_name tiBinds
+        newGamma = Assump (Map.fromList (zip names schemes))
+        mkNewGamma gamma = foldr (uncurry Map.insert) gamma (zip names schemes)
+    local (Assump . mkNewGamma . unAssump) $ do
+      gamma <- ask
+      traceM (show (text "tiLetBody, got binders:" <+>
+                    ppr tiBinds <> comma <+>
+                    text "subst env =" <+>
+                    ppr currSubst <> comma <+>
+                    text "genTyVars =" <+>
+                    ppr genericTyVars $$
+                    text "and newGamma =" <+>
+                    ppr newGamma <> semi))
+      e' <- tiExpr e
+      return $ ELet (annotationOf e') False tiBinds e'
+
+-- polymorphic non-recursive let binding
+tiLetBinding :: Binding () -> TiM (Binding QType)
+tiLetBinding (Binding _ name args body) = do
   argTypes <- mapM (const (newTyVar KStar)) args
+  let schemes = map toScheme argTypes
+      mkNewGamma gamma = foldr (uncurry Map.insert) gamma (zip args schemes)
+
+  local (Assump . mkNewGamma . unAssump) $ do
+    tiBody <- tiExpr body
+    currSubst <- gets subst
+    let actualTy = foldr tyArr (typeOf tiBody) argTypes
+        -- XXX assume we don't have qual
+        -- Newly constructed complex type should be substituted once
+        actualTy' = simpleQual (applySubst currSubst actualTy)
+    return $ Binding actualTy' name args tiBody
+
+-- Typecheck recursive bindings
+-- XXX: we need to separate non-related binding groups
+tiBindings :: [Binding ()] -> Expr () -> TiM ([Binding QType],
+                                              Expr QType)
+tiBindings binds body = do
+  -- Make a fresh tyVar for each binder name, and extend the current
+  -- gamma with those vars, since the bindings are recursive.
+  rhsTypes <- mapM (const (newTyVar KStar)) binds
+  let names = map bind_name binds
+      schemes = map toScheme rhsTypes
+      mkNewGamma gamma = foldr (uncurry Map.insert) gamma (zip names schemes)
+  
+  -- Apply the recursive subst back to rhss and gamma
+  local (Assump . mkNewGamma . unAssump) $ do
+    tiBinds <- sequence (zipWith tiBinding binds rhsTypes)
+    recSubst <- gets subst
+    gamma <- ask
+    let tiBinds' = applySubst recSubst tiBinds
+        rhsTypes' = applySubst recSubst rhsTypes
+        vss = tyVars rhsTypes'
+        fixedTyVars = tyVars (applySubst recSubst gamma)
+        genericTyVars = vss List.\\ fixedTyVars
+        schemes' = map (quantify genericTyVars . simpleQual) rhsTypes'
+        mkNewGamma gamma = foldr (uncurry Map.insert) gamma (zip names schemes')
+  
+    local (Assump . mkNewGamma . unAssump) $ do
+      body' <- tiExpr body
+      return (tiBinds', body')
+
+tiBinding :: Binding () -> Type -> TiM (Binding QType)
+tiBinding (Binding _ name args body) bindType = do
+  argTypes <- mapM (const (newTyVar KStar)) args
+  let schemes = map toScheme argTypes
+      mkNewGamma gamma = foldr (uncurry Map.insert) gamma (zip args schemes)
+
+  local (Assump . mkNewGamma . unAssump) $ do
+    tiBody <- tiExpr body
+    let actualTy = foldr tyArr (typeOf tiBody) argTypes
+    unify actualTy bindType
+    -- XXX assume we don't have qual
+    return $ Binding (simpleQual actualTy) name args tiBody
+
+tiLiteral :: Literal -> TiM QType
+tiLiteral lit = liftM simpleQual . return $ case lit of
+  LString _ -> stringType
+  LInt _ -> intType
+  LChar _ -> charType
+  LFloat _ -> floatType
+
+-- Missing instance decl
+instance HasTyVar a => HasTyVar (Binding a) where
+  applySubst s = fmap (applySubst s)
+  tyVars = List.nub . concatMap tyVars . toList
+
+instance HasTyVar a => HasTyVar (Expr a) where
+  applySubst s = fmap (applySubst s)
+  tyVars = List.nub . concatMap tyVars . toList
+
+instance InlineTypePpr QType where
+  pprAsBinding (_ :=> t) doc = doc <+> text "::" <+> pprType t
+  pprAsVar (_ :=> t) doc = parens (doc <+> text "::" <+> pprType t)
+
+traceM s = --trace s $
+  return undefined
 

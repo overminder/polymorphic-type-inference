@@ -1,2 +1,3 @@
-main = let id = \x -> x;
-        in \x -> id x x;
+id x = x;
+f x = id x x;
+main = f;

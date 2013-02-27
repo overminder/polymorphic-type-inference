@@ -1,38 +1,61 @@
-{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 
 module Core (
   Expr(..), Name, IsRec,
   Binding(..),
-  annotationOf,
+  Literal(..),
+  HasAnnotation(..),
 
   InlineTypePpr(..),
   pprExpr, pprBinding,
 ) where
 
-import Text.PrettyPrint
+import Util
+
+import Data.Traversable
+import Data.Foldable
 
 type Name = String
 type IsRec = Bool
-type Binding a = (Name, [Name], Expr a)
+
+class HasAnnotation t where
+  annotationOf :: t a -> a
+
+data Binding a
+  = Binding {
+    bind_anno :: a,
+    bind_name :: Name,
+    bind_args :: [Name],
+    bind_body :: Expr a
+  }
+  deriving (Show, Functor, Foldable, Traversable)
+
+instance HasAnnotation Binding where
+  annotationOf = bind_anno
 
 -- a: the annotation
 data Expr a
   = EVar a Name
   | ELet a IsRec [Binding a] (Expr a)
-  | EInt a Int
-  | EFloat a Double
+  | ELit a Literal
   | ELam a [Name] (Expr a)
   | EAp a (Expr a) (Expr a)
-  deriving (Show, Functor)
+  deriving (Show, Functor, Foldable, Traversable)
 
-annotationOf :: Expr a -> a
-annotationOf e = case e of
-  EVar a _ -> a
-  ELet a _ _ _ -> a
-  EInt a _ -> a
-  EFloat a _ -> a
-  ELam a _ _ -> a
-  EAp a _ _ -> a
+data Literal
+  = LString String
+  | LInt Int
+  | LFloat Double
+  | LChar Char
+  deriving (Show)
+
+instance HasAnnotation Expr where
+  annotationOf e = case e of
+    EVar a _ -> a
+    ELet a _ _ _ -> a
+    ELit a _ -> a
+    ELam a _ _ -> a
+    EAp a _ _ -> a
 
 class InlineTypePpr a where
   pprAsBinding :: a -> Doc -> Doc
@@ -42,6 +65,9 @@ instance InlineTypePpr () where
   pprAsBinding _ _ = empty
   pprAsVar _ doc = doc
 
+instance InlineTypePpr a => Ppr (Expr a) where
+  ppr = pprExpr
+
 pprExpr :: InlineTypePpr a => Expr a -> Doc
 pprExpr e = case e of
   EVar a name -> pprAsVar a (text name)
@@ -49,8 +75,7 @@ pprExpr e = case e of
     text ("let" ++ (if isRec then "rec" else "")) $$ nest 2
       (vcat (map pprBinding bindings)) $$
       text "in" <+> pprExpr body
-  EInt a i -> pprAsVar a (int i)
-  EFloat a f -> pprAsVar a (double f)
+  ELit a lit -> pprAsVar a (pprLiteral lit)
   ELam a args body -> pprAsVar a (text "\\" <> hsep (map text args) <+>
                                   text "->" <+> pprExpr body)
   EAp a _ _ -> pprAsVar a (pprEAp False e)
@@ -66,8 +91,21 @@ pprExpr e = case e of
 
         maybeParen = if needParen then parens else id
 
+instance InlineTypePpr a => Ppr (Binding a) where
+  ppr = pprBinding
+
 pprBinding :: InlineTypePpr a => Binding a -> Doc
-pprBinding (name, args, body) =
-  pprAsBinding (annotationOf body) (text name) $$
+pprBinding (Binding anno name args body) =
+  pprAsBinding anno (text name) $$
   text name <+> hsep (map text args) <+> equals <+> pprExpr body <> semi
+
+instance Ppr Literal where
+  ppr = pprLiteral
+
+pprLiteral :: Literal -> Doc
+pprLiteral lit = case lit of
+  LString s -> text (show s)
+  LInt i -> int i
+  LChar c -> char c
+  LFloat d -> double d
 
