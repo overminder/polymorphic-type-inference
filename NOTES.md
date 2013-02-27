@@ -3,9 +3,9 @@
   their ctors and args match).
 - Two dicts for storing information during type inference:
   * `Gamma`: `Map String Scheme`, maps variables to their current scheme, E.g.:
-    - `(+) :: Int -> Int -> Int`
-    - `id :: Forall a. a -> a`
-    - `head :: Forall a. [a] -> a`
+      + `(+) :: Int -> Int -> Int`
+      + `id :: Forall a. a -> a`
+      + `head :: Forall a. [a] -> a`
   * `Subst`: `Map TyVar Type`, maintains the current substitution during
     the unification process.
 
