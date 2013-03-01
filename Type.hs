@@ -7,7 +7,8 @@ module Type (
   TyCon(..), TyId(..),
   mkTyVar, mkTyCon, mkTyGen,
 
-  unitType, charType, intType, floatType, listType, arrowType,
+  unitType, charType, intType, boolType,
+  floatType, listType, arrowType,
   stringType, tuple2Type,
 
   tyArr, apTyCon, pairTypeWith, mkListType,
@@ -65,7 +66,7 @@ floatType = mkTyCon "Float" KStar
 arrowType = mkTyCon "->" (KStar `KArrow` KStar `KArrow` KStar)
 listType = mkTyCon "[]" (KStar `KArrow` KStar)
 stringType = TyApp listType charType
-tuple2Type = mkTyCon "," (KStar `KArrow` KStar)
+tuple2Type = mkTyCon "," (KStar `KArrow` KStar `KArrow` KStar)
 
 infixr 6 `tyArr`
 tyArr x y = apTyCon arrowType [x, y]

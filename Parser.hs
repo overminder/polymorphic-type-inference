@@ -25,7 +25,7 @@ languageDef
              , T.commentEnd      = "-}"
              , T.nestedComments  = True
              , T.commentLine     = "--"
-             , T.identStart      = lower <|> char '_'
+             , T.identStart      = letter <|> char '_'
              , T.identLetter     = alphaNum <|> char '_'
              , T.reservedNames   = [ "if"
                                    , "then"
@@ -100,11 +100,14 @@ pLamExpr = do
 
 pInfixExpr = buildExpressionParser opList pTerm
 
-opList = [ [Infix ((reservedOp "*"  >> return (mkBinOp "*"))  <|>
-                   (reservedOp "/"  >> return (mkBinOp "/"))) AssocLeft]
-         , [Infix ((reservedOp "+"  >> return (mkBinOp "+"))  <|>
-                   (reservedOp "-"  >> return (mkBinOp "-"))) AssocLeft]
-         , [Infix  (reservedOp "<"  >> return (mkBinOp "<"))  AssocLeft]
+opList = [ [ Infix (reservedOp "*"  >> return (mkBinOp "(*)")) AssocLeft
+           , Infix (reservedOp "/"  >> return (mkBinOp "(/)")) AssocLeft
+           ]
+         , [ Infix (reservedOp "+"  >> return (mkBinOp "(+)")) AssocLeft
+           , Infix (reservedOp "-"  >> return (mkBinOp "(-)")) AssocLeft
+           ]
+         , [ Infix (reservedOp "<"  >> return (mkBinOp "(<)")) AssocLeft
+           ]
          ]
 
 mkBinOp ratorName lhs rhs = foldl1 (EAp ()) [EVar () ratorName, lhs, rhs]
@@ -114,9 +117,22 @@ pTerm = do
   args <- many (try pAtom)
   return $ foldl (EAp ()) func args
 
-pAtom = parens pExpr
+pAtom = try pTuple2
+    <|> parens pExpr
+    <|> pList
     <|> liftM (EVar ()) ident
     <|> pNum
+
+pTuple2 = parens $ do
+  lhs <- pExpr
+  comma
+  rhs <- pExpr
+  return $ foldl1 (EAp ()) [EVar () "(,)", lhs, rhs]
+
+pList = brackets $ do
+  xs <- pExpr `sepBy` comma
+  return $ foldr (\x y -> foldl1 (EAp ()) [EVar () "(:)", x, y])
+                 (EVar () "[]") xs
 
 pNum = do
   num <- numLit
