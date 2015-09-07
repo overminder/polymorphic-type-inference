@@ -1,4 +1,4 @@
-import qualified Data.Map as Map
+import qualified Data.Map as M
 
 import Util
 import Parser
@@ -7,7 +7,7 @@ import Type
 import TyInf
 
 -- some test assumptions
-bltinAssump = Assump $ Map.fromList
+bltinAssump = Assump $ M.fromList
   [ ("(+)", toScheme (intType `tyArr` intType `tyArr` intType))
   , ("(-)", toScheme (intType `tyArr` intType `tyArr` intType))
   , ("(<)", toScheme (intType `tyArr` intType `tyArr` boolType))

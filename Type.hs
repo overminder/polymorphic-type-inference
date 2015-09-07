@@ -1,4 +1,3 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 module Type (
   Kind(..), HasKind(..),
 
@@ -22,8 +21,7 @@ module Type (
 import Util
 
 import qualified Data.List as List
-import Data.Map (Map)
-import qualified Data.Map as Map
+import qualified Data.Map as M
 
 data Kind
   = KStar
@@ -98,27 +96,27 @@ instance HasKind Type where
 -- Type manipulation
 
 -- XXX: how is this different from, say, using the associative-list approach?
-type Subst = Map TyVar Type
+type Subst = M.Map TyVar Type
 
-nullSubst = Map.empty
+nullSubst = M.empty
 
 infix 5 +->
 (+->) :: TyVar -> Type -> Subst
-(+->) = Map.singleton
+(+->) = M.singleton
 
 -- Forall s1 s2. subst the value of s2 by s1 and merge s2 with s1
 -- If there exists conflict, the result will be biased towards s1
 infixr 4 @@
 (@@) :: Subst -> Subst -> Subst
-s1 @@ s2 = Map.foldrWithKey combine s1 s2
+s1 @@ s2 = M.foldrWithKey combine s1 s2
   where
-    combine k v res = Map.insert k (applySubst s1 v) res
+    combine k v res = M.insert k (applySubst s1 v) res
 
 merge :: Monad m => Subst -> Subst -> m Subst
-merge s1 s2 = if agree then return (s1 `Map.union` s2) else fail "merge fails"
+merge s1 s2 = if agree then return (s1 `M.union` s2) else fail "merge fails"
   where
     agree = all (\v -> applySubst s1 (TyVar v) == applySubst s2 (TyVar v))
-                (Map.keys s1 `List.intersect` Map.keys s2)
+                (M.keys s1 `List.intersect` M.keys s2)
 
 
 class HasTyVar t where
@@ -126,7 +124,7 @@ class HasTyVar t where
   tyVars :: t -> [TyVar]
 
 instance HasTyVar Type where
-  applySubst s t@(TyVar u) = case Map.lookup u s of
+  applySubst s t@(TyVar u) = case M.lookup u s of
                              Just t' -> t'
                              Nothing -> t
   applySubst s (TyApp l r) = TyApp (applySubst s l) (applySubst s r)
@@ -168,7 +166,7 @@ quantify :: [TyVar] -> Qual Type -> Scheme
 quantify genTyVars concreteType
   = Forall usedKinds (applySubst tv2gen concreteType)
   where
-    tv2gen = Map.fromList (zip usedGenTyVars (map mkTyGen [0..]))
+    tv2gen = M.fromList (zip usedGenTyVars (map mkTyGen [0..]))
     usedKinds = map kind usedGenTyVars
     usedGenTyVars = [tv | tv <- tyVars concreteType, tv `elem` genTyVars]
 
@@ -177,11 +175,11 @@ toScheme :: Type -> Scheme
 toScheme = Forall [] . ([] :=>)
 
 -- Assumptions, or gamma environment
-newtype Assump = Assump { unAssump :: Map String Scheme }
+newtype Assump = Assump { unAssump :: M.Map String Scheme }
 
 instance HasTyVar Assump where
-  applySubst s = Assump . Map.map (applySubst s) . unAssump
-  tyVars = List.nub . concatMap tyVars . Map.elems . unAssump
+  applySubst s = Assump . M.map (applySubst s) . unAssump
+  tyVars = List.nub . concatMap tyVars . M.elems . unAssump
 
 -- ppr
 instance Ppr Kind where
@@ -239,7 +237,7 @@ instance Ppr Subst where
   ppr = pprSubst
 
 pprSubst :: Subst -> Doc
-pprSubst s = braces (vcat (map pprEntry (Map.toList s)))
+pprSubst s = braces (vcat (map pprEntry (M.toList s)))
   where
     pprEntry (tv, t) = pprType (TyVar tv) <+> equals <+> pprType t
 
@@ -247,7 +245,7 @@ instance Ppr Assump where
   ppr = pprAssump
 
 pprAssump :: Assump -> Doc
-pprAssump (Assump dct) = braces (vcat (map pprEntry (Map.toList dct)))
+pprAssump (Assump dct) = braces (vcat (map pprEntry (M.toList dct)))
   where
     pprEntry (name, scheme)
       = text name <+> text "::" <+> pprScheme scheme

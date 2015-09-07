@@ -18,7 +18,7 @@ cabal-version:       >=1.10
 executable icked-lang
   main-is:             Main.hs
   -- other-modules:       
-  other-extensions:    DeriveFunctor, DeriveFoldable, DeriveTraversable, TypeSynonymInstances, FlexibleInstances
+  default-extensions:  DeriveFunctor, DeriveFoldable, DeriveTraversable, TypeSynonymInstances, FlexibleInstances
   build-depends:       base >=4.8 && <4.9, containers >=0.5 && <0.6,
                        pretty >=1.1 && <1.2, transformers, mtl, parsec
   -- hs-source-dirs:      

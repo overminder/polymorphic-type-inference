@@ -1,4 +1,3 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 module TyInf (
   runTi,
   tiExpr,
@@ -11,8 +10,7 @@ import Core
 
 import Control.Monad.RWS hiding ((<>))
 import Data.Foldable (toList)
-import Data.Map (Map)
-import qualified Data.Map as Map
+import qualified Data.Map as M
 import qualified Data.List as List
 import Debug.Trace (trace)
 
@@ -143,7 +141,7 @@ tiExpr e = traceM (show (text "tiExpr" <+> pprExpr e)) >> case e of
 
   EVar _ name -> do
     gamma <- ask
-    let mbScheme = Map.lookup name (unAssump gamma)
+    let mbScheme = M.lookup name (unAssump gamma)
     case mbScheme of
       Nothing -> fail $ "unbound identifier: " ++ name
       Just scheme -> do
@@ -173,8 +171,8 @@ tiExpr e = traceM (show (text "tiExpr" <+> pprExpr e)) >> case e of
         genericTyVars = letTyVars List.\\ fixedTyVars
         schemes = map (quantify genericTyVars . annotationOf) tiBinds
         names = map bind_name tiBinds
-        newGamma = Assump (Map.fromList (zip names schemes))
-        mkNewGamma gamma = foldr (uncurry Map.insert) gamma (zip names schemes)
+        newGamma = Assump (M.fromList (zip names schemes))
+        mkNewGamma gamma = foldr (uncurry M.insert) gamma (zip names schemes)
     local (Assump . mkNewGamma . unAssump) $ do
       gamma <- ask
       traceM (show (text "tiLetBody, got binders:" <+>
@@ -193,7 +191,7 @@ tiLetBinding :: Binding () -> TiM (Binding QType)
 tiLetBinding (Binding _ name args body) = do
   argTypes <- mapM (const (newTyVar KStar)) args
   let schemes = map toScheme argTypes
-      mkNewGamma gamma = foldr (uncurry Map.insert) gamma (zip args schemes)
+      mkNewGamma gamma = foldr (uncurry M.insert) gamma (zip args schemes)
 
   local (Assump . mkNewGamma . unAssump) $ do
     tiBody <- tiExpr body
@@ -214,7 +212,7 @@ tiBindings binds body = do
   rhsTypes <- mapM (const (newTyVar KStar)) binds
   let names = map bind_name binds
       schemes = map toScheme rhsTypes
-      mkNewGamma gamma = foldr (uncurry Map.insert) gamma (zip names schemes)
+      mkNewGamma gamma = foldr (uncurry M.insert) gamma (zip names schemes)
   
   -- Apply the recursive subst back to rhss and gamma
   local (Assump . mkNewGamma . unAssump) $ do
@@ -227,7 +225,7 @@ tiBindings binds body = do
         fixedTyVars = tyVars (applySubst recSubst gamma)
         genericTyVars = vss List.\\ fixedTyVars
         schemes' = map (quantify genericTyVars . simpleQual) rhsTypes'
-        mkNewGamma gamma = foldr (uncurry Map.insert) gamma (zip names schemes')
+        mkNewGamma gamma = foldr (uncurry M.insert) gamma (zip names schemes')
   
     local (Assump . mkNewGamma . unAssump) $ do
       body' <- tiExpr body
@@ -237,7 +235,7 @@ tiBinding :: Binding () -> Type -> TiM (Binding QType)
 tiBinding (Binding _ name args body) bindType = do
   argTypes <- mapM (const (newTyVar KStar)) args
   let schemes = map toScheme argTypes
-      mkNewGamma gamma = foldr (uncurry Map.insert) gamma (zip args schemes)
+      mkNewGamma gamma = foldr (uncurry M.insert) gamma (zip args schemes)
 
   local (Assump . mkNewGamma . unAssump) $ do
     tiBody <- tiExpr body
