@@ -1,5 +1,5 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
-module TyInterf (
+module TyInf (
   runTi,
   tiExpr,
   tiBindings,
@@ -14,7 +14,7 @@ import Data.Foldable (toList)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.List as List
-import Debug.Trace
+import Debug.Trace (trace)
 
 -- Type interference state
 data TiState

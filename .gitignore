@@ -2,4 +2,4 @@
 *.o
 Main
 .*.swp
-
+.stack-work

@@ -4,7 +4,7 @@ import Util
 import Parser
 import Core
 import Type
-import TyInterf
+import TyInf
 
 -- some test assumptions
 bltinAssump = Assump $ Map.fromList
